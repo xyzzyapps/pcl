@@ -2,6 +2,7 @@ package services
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 )
 
@@ -82,42 +83,11 @@ func (f *DefaultFSService) Stat(name string) (os.FileInfo, error) {
 }
 
 func (f *DefaultFSService) LookPath(file string) (string, error) {
-	// Custom lookup supporting Windows extensions (.exe, .cmd, .bat) if not provided
-	return lookPathWithExtensions(file)
+	return exec.LookPath(file)
 }
 
 func (f *DefaultFSService) UserHomeDir() (string, error) {
 	return os.UserHomeDir()
 }
 
-func lookPathWithExtensions(file string) (string, error) {
-	// Check if already contains extension or path separator
-	ext := filepath.Ext(file)
-	if ext != "" || filepath.IsAbs(file) || filepath.Base(file) != file {
-		if _, err := os.Stat(file); err == nil {
-			return filepath.Abs(file)
-		}
-	}
 
-	pathEnv := os.Getenv("PATH")
-	dirs := filepath.SplitList(pathEnv)
-
-	// Include current directory
-	dirs = append([]string{"."}, dirs...)
-
-	exts := []string{""}
-	if ext == "" {
-		exts = append(exts, ".exe", ".cmd", ".bat", ".com", ".ps1")
-	}
-
-	for _, dir := range dirs {
-		for _, e := range exts {
-			fullPath := filepath.Join(dir, file+e)
-			if fi, err := os.Stat(fullPath); err == nil && !fi.IsDir() {
-				return filepath.Abs(fullPath)
-			}
-		}
-	}
-
-	return "", os.ErrNotExist
-}

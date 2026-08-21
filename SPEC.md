@@ -57,6 +57,8 @@ ReAct agent loop: `pkg/ai/agent.go` (Reason → Act → Observe → Reflect), to
 
 Windows: prefer native `mv`/`cp`/`ln`/`mkdir`/`rm`; do not assume GNU coreutils.
 
+**OS:** Linux and Windows are first-class. `PATH` lookup uses `exec.LookPath` (Unix executable bit; Windows `PATHEXT`). REPL VT/UTF-8 setup is Windows-only (`pkg/repl/terminal_*.go`). `ffi::load_dll` is Windows-only; other FFI (`load_go`, `math.*`, …) is portable. `cmd.exe` wrapping for `dir`/`cls` is Windows-only. Editor search is `nvim`/`vim`/`vi` on Unix, plus `.exe`/`notepad` on Windows.
+
 Not implemented (and not planned as ash clones): job control (`jobs`, `fg`, `bg`, `&`), `trap`, `test`/`[`, `pushd`/`popd`, `getopts`, `ulimit`, `hash`. File tests use UFCS (`.exists()`, `.is_file()`, …) instead of `test -f`.
 
 ---

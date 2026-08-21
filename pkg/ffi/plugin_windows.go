@@ -1,8 +1,9 @@
+//go:build windows
+
 package ffi
 
 import (
 	"fmt"
-	"runtime"
 	"syscall"
 	"unsafe"
 	"pcl/pkg/core"
@@ -17,11 +18,7 @@ var globalDLLManager = &DLLManager{
 	dlls: make(map[string]*syscall.DLL),
 }
 
-// LoadDLL loads a DLL by name (Windows only).
 func LoadDLL(dllPath string) error {
-	if runtime.GOOS != "windows" {
-		return fmt.Errorf("DLL loading is only supported on Windows")
-	}
 	dll, err := syscall.LoadDLL(dllPath)
 	if err != nil {
 		return err
@@ -30,11 +27,7 @@ func LoadDLL(dllPath string) error {
 	return nil
 }
 
-// CallDLLProc calls an exported procedure in a loaded DLL.
 func CallDLLProc(dllPath, procName string, args ...uintptr) (uintptr, uintptr, error) {
-	if runtime.GOOS != "windows" {
-		return 0, 0, fmt.Errorf("DLL loading is only supported on Windows")
-	}
 	dll, ok := globalDLLManager.dlls[dllPath]
 	if !ok {
 		var err error
@@ -54,7 +47,6 @@ func CallDLLProc(dllPath, procName string, args ...uintptr) (uintptr, uintptr, e
 	return r1, r2, lastErr
 }
 
-// CallDLLFromPCL bridges PCL values to DLL procedure calls.
 func CallDLLFromPCL(dllPath, procName string, args []*core.Value) (*core.Value, error) {
 	uintArgs := make([]uintptr, len(args))
 	for i, arg := range args {
@@ -62,7 +54,6 @@ func CallDLLFromPCL(dllPath, procName string, args []*core.Value) (*core.Value, 
 		case core.TypeInt:
 			uintArgs[i] = uintptr(arg.IntVal)
 		case core.TypeString:
-			// Convert to UTF-16 pointer on Windows or UTF-8 C string
 			p, err := syscall.UTF16PtrFromString(arg.StrVal)
 			if err != nil {
 				return nil, err

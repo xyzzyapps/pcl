@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"pcl/pkg/core"
@@ -356,13 +357,15 @@ func (in *Interpreter) Dispatch(name string, args []*core.Value, redirections []
 	proc, isProc := in.Procs[name]
 	in.mu.RUnlock()
 
-	// 1. Check Builtin Command
-	if isBuiltin {
-		return builtin(in, args)
-	}
-
-	// 2. Check User-defined Procedure
-	if isProc {
+	if isBuiltin || isProc {
+		restore, err := in.applyRedirections(redirections)
+		if err != nil {
+			return nil, err
+		}
+		defer restore()
+		if isBuiltin {
+			return builtin(in, args)
+		}
 		return in.CallProc(proc, args)
 	}
 
@@ -397,6 +400,70 @@ func (in *Interpreter) Dispatch(name string, args []*core.Value, redirections []
 	}
 
 	return core.NewInt(int64(res.ExitCode)), nil
+}
+
+func (in *Interpreter) applyRedirections(redirs []services.Redirection) (func(), error) {
+	noop := func() {}
+	if len(redirs) == 0 {
+		return noop, nil
+	}
+	saved := in.Services.IO()
+	stdin, stdout, stderr := saved.Stdin(), saved.Stdout(), saved.Stderr()
+	var files []*os.File
+	restore := func() {
+		for _, f := range files {
+			_ = f.Close()
+		}
+		in.Services.SetIO(saved)
+	}
+	for _, r := range redirs {
+		switch r.Type {
+		case services.RedirectInput:
+			f, err := os.Open(r.Target)
+			if err != nil {
+				restore()
+				return noop, err
+			}
+			files = append(files, f)
+			stdin = f
+		case services.RedirectOutput:
+			f, err := os.OpenFile(r.Target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
+			if err != nil {
+				restore()
+				return noop, err
+			}
+			files = append(files, f)
+			stdout = f
+		case services.RedirectAppend:
+			f, err := os.OpenFile(r.Target, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
+			if err != nil {
+				restore()
+				return noop, err
+			}
+			files = append(files, f)
+			stdout = f
+		case services.RedirectError:
+			f, err := os.OpenFile(r.Target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
+			if err != nil {
+				restore()
+				return noop, err
+			}
+			files = append(files, f)
+			stderr = f
+		case services.RedirectErrorAppend:
+			f, err := os.OpenFile(r.Target, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
+			if err != nil {
+				restore()
+				return noop, err
+			}
+			files = append(files, f)
+			stderr = f
+		case services.RedirectErrorToStdout:
+			stderr = stdout
+		}
+	}
+	in.Services.SetIO(services.NewCustomIOService(stdin, stdout, stderr))
+	return restore, nil
 }
 
 func (in *Interpreter) CallProc(proc *ProcDef, args []*core.Value) (*core.Value, error) {

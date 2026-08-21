@@ -18,8 +18,8 @@ func TestRedirectionAndPipeline(t *testing.T) {
 	tmpFile := "test_redirect_output.tmp"
 	defer os.Remove(tmpFile)
 
-	// Test output redirection
-	_, err := in.Eval("cmd /c echo pcl_redirection_test > " + tmpFile)
+	// Builtin echo + redirection (portable; do not use cmd.exe)
+	_, err := in.Eval("echo pcl_redirection_test > " + tmpFile)
 	if err != nil {
 		t.Fatalf("redirection failed: %v", err)
 	}
