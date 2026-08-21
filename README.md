@@ -30,7 +30,7 @@ No key yet? Offline mock:
 Run a script instead of the REPL: `.\pcl.exe demo.pcl`  
 One shot: `.\pcl.exe -c "pwd"`
 
-History lives in `~/.pcl_history` (`history`, `history clear`). **Tab** completes commands, files, `$vars`, and `ai_config` keys.  
+History lives in `~/.pcl_history` (`history`, `history clear`). **Tab** completes commands, files, `$vars`, and `ai_config` keys. After `ls`, `cd`, `cat`, `mv`, and the other file commands, type a **space** then Tab to complete filenames (`ls <Tab>`, `ls README<Tab>`). `ls<Tab>` with no space still completes the command name.  
 `p(...)` / `agent` run **in the background**. Tool use looks like other agents (`● write_file  path`, result underneath); the answer prints as normal text. You can keep typing. `jobs` lists them. Ctrl-C clears the line; it does not kill the job.  
 Editor: `nvim` if it’s on `PATH`, or set `PCL_EDITOR` / `EDITOR`.
 
