@@ -3,6 +3,7 @@ package interp
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"pcl/pkg/ai"
@@ -284,8 +285,8 @@ func (in *Interpreter) evalPrompt(promptText string, stream bool, promptOpt stri
 	opts := ai.DefaultAgentOptions()
 	opts.Model = in.Services.Config().Get("model")
 	opts.SystemPrompt = in.Services.Config().Get("system_prompt")
-	if stream {
-		opts.StreamWriter = in.Services.IO().Stdout()
+	if sw := in.streamDest(stream); sw != nil {
+		opts.StreamWriter = sw
 	}
 
 	followTools := true
@@ -328,8 +329,8 @@ func (in *Interpreter) evalPrompt(promptText string, stream bool, promptOpt stri
 		}
 	}
 
-	if stream {
-		req.StreamWriter = in.Services.IO().Stdout()
+	if sw := in.streamDest(stream); sw != nil {
+		req.StreamWriter = sw
 	}
 
 	resp, err := in.Services.AI().Prompt(in.Ctx, req)
@@ -338,6 +339,16 @@ func (in *Interpreter) evalPrompt(promptText string, stream bool, promptOpt stri
 	}
 
 	return core.NewResponse(resp), nil
+}
+
+func (in *Interpreter) streamDest(explicit bool) io.Writer {
+	if in.StreamWriter != nil {
+		return in.StreamWriter
+	}
+	if explicit && in.Services != nil && in.Services.IO() != nil {
+		return in.Services.IO().Stdout()
+	}
+	return nil
 }
 
 // EvalExpr evaluates simple arithmetic and logical expressions for expr / if / while.

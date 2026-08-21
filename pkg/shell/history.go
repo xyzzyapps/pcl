@@ -49,6 +49,13 @@ func NewHistoryManager(customPath string) *HistoryManager {
 	return hm
 }
 
+func (h *HistoryManager) Path() string {
+	if h == nil {
+		return ""
+	}
+	return h.historyPath
+}
+
 // Load reads existing history entries from the history file.
 func (hm *HistoryManager) Load() error {
 	hm.mu.Lock()

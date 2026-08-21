@@ -12,7 +12,7 @@ PCL is an embeddable command language and interactive shell written in Go. It co
 
 PCL is **not** POSIX `sh`. Scripts that assume `&&` / `||` command lists, job control, `test`/`[`, or here-documents are out of scope unless listed below.
 
-End-user usage (REPL, prompts, vim): **[README.md](README.md)**.
+End-user usage (REPL, prompts, vim): **[README.md](README.md)**. Interactive REPL uses `github.com/chzyer/readline` (Tab completion, history). `p(...)` / `agent` are background jobs with streaming (`jobs` lists them).
 
 ---
 
@@ -157,7 +157,7 @@ Expression      ::= "(" LogicalOrExpr ")"
 
 ## 8. Prompting, tools, and editor (reference)
 
-`p(...)` / `p!(...)` (stream) and `prompt` / `p` commands send a chat completion with registered tools. By default PCL **follows `tool_calls`**: execute, append `role=tool` observations, repeat until the model stops or `max_turns` (default 10). Opt out: `with { agent: false }` or `max_turns: 1`.
+`p(...)` / `p!(...)` (stream) and `prompt` / `p` commands send a chat completion with registered tools. By default PCL **follows `tool_calls`**: execute, append `role=tool` observations, repeat until the model stops or `max_turns` (default 50). Opt out: `with { agent: false }` or `max_turns: 1`.
 
 Reasoning is taken from API `reasoning_content` and `<think>…</think>` (`$x.reasoning`, `$x.thought`). Flattened tool calls from all turns stay on `$x.tools` / `$x.tools_used()`. Agent steps: `$x.steps`.
 

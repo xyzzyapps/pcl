@@ -1,13 +1,13 @@
 package builtins
 
 import (
-	"bytes"
 	"fmt"
 	"strings"
 	"pcl/pkg/ai"
 	"pcl/pkg/core"
 	"pcl/pkg/interp"
 	"pcl/pkg/services"
+	"pcl/pkg/shell"
 )
 
 // RegisterAIBuiltins registers prompt, tool management, and ReAct agent primitives.
@@ -139,21 +139,16 @@ func RegisterAIBuiltins(in *interp.Interpreter) {
 func registerDefaultEnvironmentTools(in *interp.Interpreter) {
 	aiSvc := in.Services.AI()
 
-	// 1. sh / bash tool: executes shell command and captures stdout/stderr/exit code
-	aiSvc.RegisterTool("sh", "Execute a shell command and return stdout/stderr output", map[string]interface{}{"cmd": "string"}, func(argMap map[string]interface{}) (*core.Value, error) {
+	// 1. sh: POSIX shell (busybox sh on Windows, sh on Unix)
+	aiSvc.RegisterTool("sh", "Run a POSIX shell command (busybox sh on Windows, sh on Unix). Pass the script in cmd.", map[string]interface{}{"cmd": "string"}, func(argMap map[string]interface{}) (*core.Value, error) {
 		cmdStr, _ := argMap["cmd"].(string)
 		if cmdStr == "" {
 			return core.NewString("Error: cmd parameter required"), nil
 		}
 
-		var outBuf, errBuf bytes.Buffer
-		savedIO := in.Services.IO()
-		in.Services.SetIO(services.NewCustomIOService(savedIO.Stdin(), &outBuf, &errBuf))
-		_, err := in.Eval(cmdStr)
-		in.Services.SetIO(savedIO)
-
-		output := strings.TrimSpace(outBuf.String())
-		errOut := strings.TrimSpace(errBuf.String())
+		out, errOut, err := shell.RunPOSIX(in.Ctx, cmdStr)
+		output := strings.TrimSpace(out)
+		errOut = strings.TrimSpace(errOut)
 
 		if err != nil {
 			if errOut != "" {

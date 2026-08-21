@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -24,7 +25,8 @@ type Interpreter struct {
 	Services *services.ServiceLocator
 	Builtins map[string]BuiltinFunc
 	Procs    map[string]*ProcDef
-	Aliases  map[string]string
+	Aliases      map[string]string
+	StreamWriter io.Writer
 }
 
 // NewInterpreter constructs a new Interpreter.
@@ -51,6 +53,22 @@ func (in *Interpreter) RegisterBuiltin(name string, fn BuiltinFunc) {
 	in.mu.Lock()
 	defer in.mu.Unlock()
 	in.Builtins[name] = fn
+}
+
+func (in *Interpreter) CommandNames() []string {
+	in.mu.RLock()
+	defer in.mu.RUnlock()
+	names := make([]string, 0, len(in.Builtins)+len(in.Aliases)+len(in.Procs))
+	for n := range in.Builtins {
+		names = append(names, n)
+	}
+	for n := range in.Aliases {
+		names = append(names, n)
+	}
+	for n := range in.Procs {
+		names = append(names, n)
+	}
+	return names
 }
 
 // Eval parses and evaluates a PCL script.

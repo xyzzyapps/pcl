@@ -10,6 +10,7 @@ import (
 	"time"
 	"pcl/pkg/core"
 	"pcl/pkg/interp"
+	"pcl/pkg/services"
 	"pcl/pkg/shell"
 )
 
@@ -174,6 +175,50 @@ func RegisterShellBuiltins(in *interp.Interpreter) {
 			in.Services.IO().Printf("%4d  %s\n", i+1, entry)
 		}
 		return core.NewList(items...), nil
+	})
+
+	// ls [-a] [-l] ?<path...>?
+	in.RegisterBuiltin("ls", func(in *interp.Interpreter, args []*core.Value) (*core.Value, error) {
+		all := false
+		long := false
+		paths := make([]string, 0)
+		for _, arg := range args {
+			s := arg.String()
+			if strings.HasPrefix(s, "-") && s != "-" && !strings.HasPrefix(s, "-/") {
+				for _, c := range strings.TrimPrefix(s, "-") {
+					switch c {
+					case 'a':
+						all = true
+					case 'l':
+						long = true
+					default:
+						return nil, fmt.Errorf("ls: unknown option -%c", c)
+					}
+				}
+				continue
+			}
+			paths = append(paths, s)
+		}
+		if len(paths) == 0 {
+			paths = []string{"."}
+		}
+		io := in.Services.IO()
+		names := make([]*core.Value, 0)
+		multi := len(paths) > 1
+		for i, p := range paths {
+			if multi {
+				if i > 0 {
+					io.Println("")
+				}
+				io.Printf("%s:\n", p)
+			}
+			listed, err := listPath(p, all, long, io)
+			if err != nil {
+				return nil, fmt.Errorf("ls: %s: %w", p, err)
+			}
+			names = append(names, listed...)
+		}
+		return core.NewList(names...), nil
 	})
 
 	// glob <pattern...> or g <pattern...>
@@ -520,6 +565,52 @@ func RegisterShellBuiltins(in *interp.Interpreter) {
 		}
 		return core.NewNull(), nil
 	})
+}
+
+func listPath(path string, all, long bool, out services.IOService) ([]*core.Value, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		printLsEntry(out, path, info, long)
+		return []*core.Value{core.NewString(path)}, nil
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]*core.Value, 0, len(entries))
+	for _, e := range entries {
+		name := e.Name()
+		if !all && strings.HasPrefix(name, ".") {
+			continue
+		}
+		full := filepath.Join(path, name)
+		fi, err := e.Info()
+		if err != nil {
+			fi, err = os.Stat(full)
+			if err != nil {
+				continue
+			}
+		}
+		display := name
+		if fi.IsDir() && !long {
+			display = name + "/"
+		}
+		printLsEntry(out, display, fi, long)
+		names = append(names, core.NewString(filepath.ToSlash(full)))
+	}
+	return names, nil
+}
+
+func printLsEntry(out services.IOService, name string, fi os.FileInfo, long bool) {
+	if !long {
+		out.Println(name)
+		return
+	}
+	mode := fi.Mode().String()
+	out.Printf("%s %10d %s %s\n", mode, fi.Size(), fi.ModTime().Format("2006-01-02 15:04"), name)
 }
 
 func copyPath(src, dst string) error {

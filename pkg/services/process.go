@@ -106,12 +106,12 @@ func (p *DefaultProcessService) ExecutePipeline(ctx context.Context, commands []
 		isFirst := (i == 0)
 		isLast := (i == len(commands)-1)
 
-		cmdPath, err := p.resolveCommand(spec.Name)
+		cmdPath, args, err := p.resolveExec(spec.Name, spec.Args)
 		if err != nil {
 			return &ProcessResult{ExitCode: 127}, fmt.Errorf("command not found: %s", spec.Name)
 		}
 
-		cmd := exec.CommandContext(ctx, cmdPath, spec.Args...)
+		cmd := exec.CommandContext(ctx, cmdPath, args...)
 		cmds = append(cmds, cmd)
 
 		// Set stdin
@@ -219,12 +219,12 @@ func (p *DefaultProcessService) ExecutePipeline(ctx context.Context, commands []
 }
 
 func (p *DefaultProcessService) executeSingle(ctx context.Context, spec CommandSpec, defaultStdin io.Reader, defaultStdout, defaultStderr io.Writer) (*ProcessResult, error) {
-	cmdPath, err := p.resolveCommand(spec.Name)
+	cmdPath, args, err := p.resolveExec(spec.Name, spec.Args)
 	if err != nil {
 		return &ProcessResult{ExitCode: 127}, fmt.Errorf("command not found: %s", spec.Name)
 	}
 
-	cmd := exec.CommandContext(ctx, cmdPath, spec.Args...)
+	cmd := exec.CommandContext(ctx, cmdPath, args...)
 	cmd.Stdin = defaultStdin
 	cmd.Stdout = defaultStdout
 	cmd.Stderr = defaultStderr
@@ -289,6 +289,26 @@ func (p *DefaultProcessService) executeSingle(ctx context.Context, spec CommandS
 	}
 
 	return &ProcessResult{ExitCode: exitCode}, nil
+}
+
+func (p *DefaultProcessService) resolveExec(name string, args []string) (string, []string, error) {
+	if strings.EqualFold(name, "sh") {
+		if runtime.GOOS == "windows" {
+			for _, bb := range []string{"busybox", "busybox.exe", "busybox64.exe"} {
+				if pth, err := p.fs.LookPath(bb); err == nil {
+					return pth, append([]string{"sh"}, args...), nil
+				}
+			}
+			return "", nil, fmt.Errorf("busybox not found on PATH (needed for sh on Windows)")
+		}
+		pth, err := p.fs.LookPath("sh")
+		if err != nil {
+			return "", nil, err
+		}
+		return pth, args, nil
+	}
+	pth, err := p.resolveCommand(name)
+	return pth, args, err
 }
 
 func (p *DefaultProcessService) resolveCommand(name string) (string, error) {

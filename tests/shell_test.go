@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"pcl/pkg/builtins"
 	"pcl/pkg/interp"
@@ -32,6 +33,48 @@ func TestShellBuiltins(t *testing.T) {
 		t.Fatalf("expected OS env MY_PCL_VAR=hello, got %q", os.Getenv("MY_PCL_VAR"))
 	}
 	t.Cleanup(func() { os.Unsetenv("MY_PCL_VAR") })
+}
+
+func TestLsBuiltin(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".hidden"), []byte("h"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	loc := services.GetLocator()
+	in := interp.NewInterpreter(context.Background(), loc)
+	builtins.RegisterShellBuiltins(in)
+
+	quoted := filepath.ToSlash(dir)
+	val, err := in.Eval(`ls "` + quoted + `"`)
+	if err != nil {
+		t.Fatalf("ls failed: %v", err)
+	}
+	s := val.String()
+	if !strings.Contains(s, "a.txt") || !strings.Contains(s, "sub") {
+		t.Fatalf("ls missing entries: %s", s)
+	}
+	if strings.Contains(s, ".hidden") {
+		t.Fatalf("ls showed hidden file without -a: %s", s)
+	}
+
+	val, err = in.Eval(`ls -a "` + quoted + `"`)
+	if err != nil {
+		t.Fatalf("ls -a failed: %v", err)
+	}
+	if !strings.Contains(val.String(), ".hidden") {
+		t.Fatalf("ls -a missing .hidden: %s", val.String())
+	}
+
+	if _, err := in.Eval(`ls -l "` + quoted + `"`); err != nil {
+		t.Fatalf("ls -l failed: %v", err)
+	}
 }
 
 func TestTrueFalseStatus(t *testing.T) {

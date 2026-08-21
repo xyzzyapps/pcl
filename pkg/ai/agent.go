@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"pcl/pkg/core"
 	"pcl/pkg/services"
@@ -27,14 +28,14 @@ type AgentOptions struct {
 // DefaultAgentOptions provides sensible defaults for agent execution.
 func DefaultAgentOptions() AgentOptions {
 	return AgentOptions{
-		MaxTurns: 10,
+		MaxTurns: 50,
 	}
 }
 
 // RunReActLoop executes the autonomous Reason + Act + Observe loop grounded in environment feedback.
 func RunReActLoop(ctx context.Context, aiSvc services.AIService, exec ToolExecutor, goal string, opts AgentOptions) (*core.Response, error) {
 	if opts.MaxTurns <= 0 {
-		opts.MaxTurns = 10
+		opts.MaxTurns = 50
 	}
 
 	systemPrompt := opts.SystemPrompt
@@ -62,10 +63,11 @@ func RunReActLoop(ctx context.Context, aiSvc services.AIService, exec ToolExecut
 	for turn := 1; turn <= opts.MaxTurns; turn++ {
 		tools := exec.ListTools()
 		req := &services.AIMultiTurnRequest{
-			Messages:     messages,
-			Tools:        tools,
-			Model:        opts.Model,
-			StreamWriter: opts.StreamWriter,
+			Messages: messages,
+			Tools:    tools,
+			Model:    opts.Model,
+			// Do not HTTP-stream agent turns: tool-only chunks are empty and
+			// token writes fight the REPL. Log each turn below instead.
 		}
 
 		resp, err := aiSvc.PromptMessages(ctx, req)
@@ -79,6 +81,15 @@ func RunReActLoop(ctx context.Context, aiSvc services.AIService, exec ToolExecut
 			totalUsage.TotalTokens += resp.Usage.TotalTokens
 		}
 		lastModel = resp.Model
+
+		if opts.StreamWriter != nil {
+			traceThought(opts.StreamWriter, resp.Reasoning)
+			if len(resp.ToolCalls) == 0 {
+				traceAnswer(opts.StreamWriter, resp.Text)
+			} else if strings.TrimSpace(resp.Text) != "" {
+				traceThought(opts.StreamWriter, resp.Text)
+			}
+		}
 
 		step := &core.AgentStep{
 			Turn:      turn,
@@ -114,12 +125,19 @@ func RunReActLoop(ctx context.Context, aiSvc services.AIService, exec ToolExecut
 		})
 
 		for _, tc := range resp.ToolCalls {
+			if opts.StreamWriter != nil {
+				traceTool(opts.StreamWriter, tc)
+			}
 			resultVal, execErr := exec.ExecuteToolCall(tc)
 			obsStr := ""
 			if execErr != nil {
 				obsStr = fmt.Sprintf("Error: %v", execErr)
 			} else if resultVal != nil {
 				obsStr = resultVal.String()
+			}
+
+			if opts.StreamWriter != nil {
+				traceObservation(opts.StreamWriter, obsStr)
 			}
 
 			step.Observations = append(step.Observations, obsStr)
@@ -166,4 +184,35 @@ func RunReActLoop(ctx context.Context, aiSvc services.AIService, exec ToolExecut
 	}
 
 	return finalResponse, nil
+}
+
+func compactArgs(args map[string]interface{}) string {
+	if len(args) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+compactOneLine(fmt.Sprint(args[k]), 80))
+	}
+	return strings.Join(parts, "  ")
+}
+
+func compactOneLine(s string, max int) string {
+	s = strings.TrimSpace(s)
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\t", " ")
+	for strings.Contains(s, "  ") {
+		s = strings.ReplaceAll(s, "  ", " ")
+	}
+	rs := []rune(s)
+	if max > 0 && len(rs) > max {
+		return string(rs[:max]) + "…"
+	}
+	return s
 }

@@ -4,6 +4,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 )
 
 // FSService defines file system operations.
@@ -83,7 +85,61 @@ func (f *DefaultFSService) Stat(name string) (os.FileInfo, error) {
 }
 
 func (f *DefaultFSService) LookPath(file string) (string, error) {
+	file = strings.TrimSpace(file)
+	if file == "" {
+		return "", os.ErrNotExist
+	}
+	// Explicit path: ./tool.exe, .\tool.exe, /usr/bin/ls
+	if strings.ContainsAny(file, `/\`) {
+		if p, err := absIfExec(file); err == nil {
+			return p, nil
+		}
+	}
+	// Same directory as the shell (cmd.exe / interactive shells search cwd;
+	// Go 1.19+ exec.LookPath does not, which broke running foo.exe here).
+	for _, cand := range cwdExecCandidates(file) {
+		if p, err := absIfExec(cand); err == nil {
+			return p, nil
+		}
+	}
 	return exec.LookPath(file)
+}
+
+func cwdExecCandidates(file string) []string {
+	out := []string{filepath.Join(".", file)}
+	if runtime.GOOS != "windows" {
+		return out
+	}
+	ext := filepath.Ext(file)
+	if ext != "" {
+		return out
+	}
+	pathext := os.Getenv("PATHEXT")
+	if pathext == "" {
+		pathext = ".COM;.EXE;.BAT;.CMD"
+	}
+	for _, e := range strings.Split(pathext, ";") {
+		e = strings.TrimSpace(e)
+		if e == "" {
+			continue
+		}
+		out = append(out, filepath.Join(".", file+e))
+	}
+	return out
+}
+
+func absIfExec(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		return "", os.ErrNotExist
+	}
+	if runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
+		return "", os.ErrPermission
+	}
+	return filepath.Abs(path)
 }
 
 func (f *DefaultFSService) UserHomeDir() (string, error) {

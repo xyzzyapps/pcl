@@ -1,5 +1,7 @@
 # PCL
 
+[![Built with Grok](https://img.shields.io/badge/Built_with-Grok-000000?style=flat&logo=xai&logoColor=white)](https://grok.com)
+
 A command shell that can **run programs**, **edit in Neovim**, and **talk to a model** in the same session.
 
 Type at a prompt. Pipe output. `cd` around. Ask `p(...)` to read files, write files, and run commands until it has an answer — then open whatever it touched in vim.
@@ -28,7 +30,8 @@ No key yet? Offline mock:
 Run a script instead of the REPL: `.\pcl.exe demo.pcl`  
 One shot: `.\pcl.exe -c "pwd"`
 
-History lives in `~/.pcl_history` (`history`, `history clear`).  
+History lives in `~/.pcl_history` (`history`, `history clear`). **Tab** completes commands, files, `$vars`, and `ai_config` keys.  
+`p(...)` / `agent` run **in the background**. Tool use looks like other agents (`● write_file  path`, result underneath); the answer prints as normal text. You can keep typing. `jobs` lists them. Ctrl-C clears the line; it does not kill the job.  
 Editor: `nvim` if it’s on `PATH`, or set `PCL_EDITOR` / `EDITOR`.
 
 Startup file: `config.pcl` in the current directory, or `~/.pclrc`.
@@ -43,6 +46,8 @@ Everyday ash-ish commands work here — and on Windows without GNU tools:
 cd ~/src/app
 pwd
 ls
+ls -l
+ls -a
 cat README.md | grep TODO
 mkdir -p tmp/out
 cp README.md tmp/out/
@@ -82,6 +87,7 @@ cd -
 Blocks use `( )`. Lists and dicts use `{ }`.
 
 ```pcl
+i = 1
 while ($i <= 3) (
     echo $i
     i = ($i + 1)
@@ -91,6 +97,58 @@ files = { main.go server.go }
 
 Anything that isn’t a builtin is looked up on `PATH` (`grep`, `git`, `go`, …).
 
+### BusyBox (`sh`)
+
+POSIX `sh` is how the **agent `sh` tool** and the **`sh` command** run scripts (`grep`, `sed`, `test`, pipelines the model writes, and so on).
+
+| OS | What PCL runs |
+|---|---|
+| Windows | `busybox sh -c "…"` |
+| Linux | `sh -c "…"` |
+
+On Windows, put **BusyBox** on `PATH` or in the current directory as `busybox.exe` (or `busybox64.exe`). Without it, `sh` fails with “busybox not found”.
+
+A common Windows build is [BusyBox for Windows](https://frippery.org/busybox/) (or any `busybox.exe` that implements the `sh` applet). Check:
+
+```pcl
+which busybox
+sh -c "echo ok && uname"
+```
+
+Linux needs a normal `/bin/sh` (dash or bash in `sh` mode). You do not need BusyBox there.
+
+PCL builtins (`ls`, `cd`, `rm`, `echo`, …) do **not** go through BusyBox. Only `sh` and the agent’s `sh` tool do.
+
+### `$` vs methods
+
+Bare words are **commands**. `$name` is the **value**. Assignment has no `$`.
+
+```pcl
+x = p( summarize this repo )
+x              # command named x (usually “not found”)
+$x             # the response value
+echo $x
+puts "got $x"
+```
+
+Once you use **`.` or `()`**, it is a method on that variable — **no `$`**:
+
+```pcl
+x.vim()
+x.files()
+x.response
+"notes.txt".read()
+[glob "*.go"].vim()
+```
+
+You still need `$` for:
+
+- the value itself: `$x`, `echo $x`, `echo $status` (also `$?`)
+- strings: `"hello $name"`
+- expressions: `while ($i <= 3)`, `if ($a > $b)`
+- pipeline taps: `|> $errors`
+- `export` / env names are not `$`: `export EDITOR=nvim`
+
 ---
 
 ## Prompting
@@ -99,9 +157,9 @@ Anything that isn’t a builtin is looked up on `PATH` (`grep`, `git`, `go`, …
 
 ```pcl
 x = p( read config.pcl and explain the model setting )
-puts $x.response
-puts $x.reasoning
-puts $x.tools_used()
+puts x.response
+puts x.reasoning
+puts x.tools_used()
 ```
 
 Stream tokens as they arrive:
@@ -116,13 +174,13 @@ Open the result in the editor:
 
 ```pcl
 x = p( add a README section on install )
-$x.vim()
+x.vim()
 ```
 
 Longer jobs:
 
 ```pcl
-x = p( fix the failing tests ) with { max_turns: 8 }
+x = p( fix the failing tests ) with { max_turns: 50 }
 agent "inspect the repo and run tests"
 ```
 
@@ -145,14 +203,14 @@ x = p( summarize *.go and tell me what the package does )
 
 ## Vim / Neovim
 
-After a prompt, files the model wrote or named are on `$x.files()`. `.vim()` opens them in tabs (`nvim -p`).
+After a prompt, files the model wrote or named are on `x.files()`. `.vim()` opens them in tabs (`nvim -p`).
 
 ```pcl
 x = p( generate main.go and server.go for a tiny HTTP service )
-puts $x.files()
-$x.vim()                 # all generated files, one tab each
-$x.files().vim()
-$x.reasoning.vim()       # the thought trace in a buffer
+puts x.files()
+x.vim()                  # all generated files, one tab each
+x.files().vim()
+x.reasoning.vim()        # the thought trace in a buffer
 [glob "*.go"].vim()      # any list of paths
 ```
 
