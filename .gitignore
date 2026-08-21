@@ -2,9 +2,9 @@
 config.pcl
 .pclrc
 
-# Build
-pcl
-pcl.exe
+# Build (root binary only — do not ignore cmd/pcl/)
+/pcl
+/pcl.exe
 *.exe
 *.dll
 *.so
