@@ -2,7 +2,7 @@
 
 [![Built with Grok](https://img.shields.io/badge/Built_with-Grok-000000?style=flat&logo=xai&logoColor=white)](https://grok.com)
 
-A command shell that can **run programs**, **edit in Neovim**, and **talk to a model** in the same session.
+A command shell inspired by tcl that can **run programs**, **edit in Neovim**, and **talk to a model** in the same session.
 
 Type at a prompt. Pipe output. `cd` around. Ask `p(...)` to read files, write files, and run commands until it has an answer — then open whatever it touched in vim.
 
