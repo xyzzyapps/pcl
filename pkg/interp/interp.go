@@ -10,8 +10,10 @@ import (
 	"sync"
 	"pcl/pkg/core"
 	"pcl/pkg/ffi"
+	"pcl/pkg/mcpctl"
 	"pcl/pkg/parser"
 	"pcl/pkg/services"
+	"pcl/pkg/skills"
 )
 
 // BuiltinFunc is the signature for built-in PCL commands.
@@ -27,6 +29,8 @@ type Interpreter struct {
 	Procs    map[string]*ProcDef
 	Aliases      map[string]string
 	StreamWriter io.Writer
+	Skills       *skills.Registry
+	MCP          *mcpctl.Manager
 }
 
 // NewInterpreter constructs a new Interpreter.
@@ -45,6 +49,8 @@ func NewInterpreter(ctx context.Context, loc *services.ServiceLocator) *Interpre
 		Builtins: make(map[string]BuiltinFunc),
 		Procs:    make(map[string]*ProcDef),
 		Aliases:  make(map[string]string),
+		Skills:   skills.NewRegistry(),
+		MCP:      mcpctl.NewManager(),
 	}
 }
 
@@ -53,6 +59,18 @@ func (in *Interpreter) RegisterBuiltin(name string, fn BuiltinFunc) {
 	in.mu.Lock()
 	defer in.mu.Unlock()
 	in.Builtins[name] = fn
+}
+
+// EffectiveSystemPrompt is the configured system prompt plus the skill catalog.
+func (in *Interpreter) EffectiveSystemPrompt() string {
+	base := ""
+	if in.Services != nil && in.Services.Config() != nil {
+		base = in.Services.Config().Get("system_prompt")
+	}
+	if in.Skills == nil {
+		return base
+	}
+	return skills.CatalogPrompt(base, in.Skills.List())
 }
 
 func (in *Interpreter) CommandNames() []string {

@@ -62,6 +62,12 @@ func (c *UniversalAIClient) RegisterTool(name string, description string, params
 	}
 }
 
+func (c *UniversalAIClient) UnregisterTool(name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.tools, name)
+}
+
 func (c *UniversalAIClient) GetTool(name string) (*core.ToolCall, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

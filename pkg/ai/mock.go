@@ -43,6 +43,12 @@ func (m *MockAIClient) RegisterTool(name string, description string, params map[
 	}
 }
 
+func (m *MockAIClient) UnregisterTool(name string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.tools, name)
+}
+
 func (m *MockAIClient) GetTool(name string) (*core.ToolCall, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

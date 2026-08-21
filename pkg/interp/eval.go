@@ -284,7 +284,7 @@ func isIdentRune(r rune) bool {
 func (in *Interpreter) evalPrompt(promptText string, stream bool, promptOpt string) (*core.Value, error) {
 	opts := ai.DefaultAgentOptions()
 	opts.Model = in.Services.Config().Get("model")
-	opts.SystemPrompt = in.Services.Config().Get("system_prompt")
+	opts.SystemPrompt = in.EffectiveSystemPrompt()
 	if sw := in.streamDest(stream); sw != nil {
 		opts.StreamWriter = sw
 	}
@@ -317,7 +317,7 @@ func (in *Interpreter) evalPrompt(promptText string, stream bool, promptOpt stri
 
 	req := &services.AIRequest{
 		Prompt:       promptText,
-		SystemPrompt: in.Services.Config().Get("system_prompt"),
+		SystemPrompt: in.EffectiveSystemPrompt(),
 		Model:        in.Services.Config().Get("model"),
 		Temperature:  0.7,
 		Tools:        in.Services.AI().ListTools(),

@@ -27,7 +27,7 @@ func RegisterAIBuiltins(in *interp.Interpreter) {
 
 		req := &services.AIRequest{
 			Prompt:       sb.String(),
-			SystemPrompt: in.Services.Config().Get("system_prompt"),
+			SystemPrompt: in.EffectiveSystemPrompt(),
 			Model:        in.Services.Config().Get("model"),
 			Tools:        in.Services.AI().ListTools(),
 		}
@@ -53,7 +53,7 @@ func RegisterAIBuiltins(in *interp.Interpreter) {
 
 		opts := ai.DefaultAgentOptions()
 		opts.Model = in.Services.Config().Get("model")
-		opts.SystemPrompt = in.Services.Config().Get("system_prompt")
+		opts.SystemPrompt = in.EffectiveSystemPrompt()
 
 		resp, err := ai.RunReActLoop(in.Ctx, in.Services.AI(), in, goal, opts)
 		if err != nil {
@@ -101,6 +101,8 @@ func RegisterAIBuiltins(in *interp.Interpreter) {
 
 	// Register default ground-truth environment tools
 	registerDefaultEnvironmentTools(in)
+	registerSkillBuiltins(in)
+	registerMCPBuiltin(in)
 
 	// ai_config ?<key>? ?<value>?
 	in.RegisterBuiltin("ai_config", func(in *interp.Interpreter, args []*core.Value) (*core.Value, error) {

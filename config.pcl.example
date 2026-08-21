@@ -40,6 +40,10 @@ ai_config model "deepseek-v4-flash"
 # # ai_config model "x-ai/grok-4"
 # # ai_config model "openai/gpt-4.1"
 
+# MCP (stdio). Same as the `mcp add` command. Child inherits exported env.
+# export GITHUB_TOKEN=$GITHUB_TOKEN
+# mcp add github -- npx -y @modelcontextprotocol/server-github
+
 # Optional FFI helpers
 # ffi::bind upper strings.ToUpper
 # load_go "custom_funcs.go"

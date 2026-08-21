@@ -57,6 +57,8 @@ func RegisterShellBuiltins(in *interp.Interpreter) {
 		os.Setenv("PWD", newWd)
 		os.Setenv("OLDPWD", oldPwd)
 
+		refreshSkills(in, true)
+
 		return core.NewString(newWd), nil
 	})
 

@@ -52,7 +52,7 @@ ReAct agent loop: `pkg/ai/agent.go` (Reason → Act → Observe → Reflect), to
 | Language: `set`, `unset`, `proc`, `return`, `if`, `while`, `for`, `foreach`, `break`, `continue`, `expr`, `source`, `puts`, `gets`, `list`, `lindex`, `llength`, `lappend` | `ls`, `cat`, `grep`, `sed`, `awk`, `head`, `tail`, `wc`, compilers, editors, … |
 | Shell: `true`, `false`, `cd`, `pwd`, `echo`, `export`, `env`, `unsetenv`, `exit`, `which`, `clear`/`cls`, `history`, `glob`/`g`, `alias`, `unalias` | Anything not registered as a builtin or FFI name |
 | Files: `touch`, `mkdir`, `rmdir`, `rm`, `mv`, `cp`, `ln` | |
-| AI: `prompt`/`p`, `agent`, `tool`, `ai_config`, `tools` | |
+| AI: `prompt`/`p`, `agent`, `tool`, `ai_config`, `tools`, `skills`, `mcp` | |
 | FFI: `ffi::call`, `ffi::bind`, `ffi::list`, `ffi::load_dll`, `load_go` | |
 
 Windows: prefer native `mv`/`cp`/`ln`/`mkdir`/`rm`; do not assume GNU coreutils.
@@ -161,7 +161,11 @@ Expression      ::= "(" LogicalOrExpr ")"
 
 Reasoning is taken from API `reasoning_content` and `<think>…</think>` (`$x.reasoning`, `$x.thought`). Flattened tool calls from all turns stay on `$x.tools` / `$x.tools_used()`. Agent steps: `$x.steps`.
 
-Default tools: `sh` (`cmd`), `read_file` (`path`), `write_file` (`path`, `content`). User tools: `tool name (params) ( body )` — params are bound when the model calls the tool.
+Default tools: `sh` (`cmd`), `read_file` (`path`), `write_file` (`path`, `content`), `read_skill` (`name`). User tools: `tool name (params) ( body )` — params are bound when the model calls the tool.
+
+**Skills:** scan `~/.pcl/skills`, `<cwd>/.pcl/skills`, `<cwd>/.grok/skills`, `<cwd>/skills` for `*/SKILL.md`. Catalog (name + description) is appended to the system prompt. Full body is loaded only via `read_skill`. Rescan after `cd`; print gained/dropped names.
+
+**MCP:** stdio only (`github.com/modelcontextprotocol/go-sdk`). `mcp add name -- cmd args…` spawns the server, `tools/list`, registers each tool as `name_toolname`. `mcp list` / `mcp tools` / `mcp remove`. Valid in `config.pcl`. Sessions closed on process exit. Not implemented: HTTP/SSE, OAuth, resources, prompts, sampling.
 
 `$x.files()` scans tool-call paths and markdown fences. `.vim()` / `OpenMultipleInEditor` launches `PCL_EDITOR` or `EDITOR` or `nvim`/`vim` with `-p` for multiple files.
 

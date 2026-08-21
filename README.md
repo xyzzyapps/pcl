@@ -190,6 +190,35 @@ One completion, no tool loop:
 p( haiku about shells ) with { agent: false }
 ```
 
+### Skills
+
+A skill is a folder with `SKILL.md` (YAML frontmatter `name` + `description`, then instructions). PCL lists them in the agent system prompt; the model loads the full file with the **`read_skill`** tool.
+
+Looked up on startup and after **`cd`**:
+
+- `~/.pcl/skills/<name>/SKILL.md`
+- `./.pcl/skills/`, `./.grok/skills/`, `./skills/` in the directory you are in
+
+Gained or dropped names print (`gained skills: pdf, review`). `skills` lists the catalog.
+
+```pcl
+skills
+p( fill the W-2 using the pdf skill )
+```
+
+### MCP
+
+Stdio MCP servers (official Go SDK). Tools show up next to `sh` / `read_file`, named `server_tool`.
+
+```pcl
+mcp add github -- npx -y @modelcontextprotocol/server-github
+mcp list
+mcp tools
+mcp remove github
+```
+
+Same `mcp add` line works in `config.pcl`. Child processes inherit `export`ed env (`GITHUB_TOKEN`, …). HTTP/SSE MCP is not implemented.
+
 Define a tool the model can call:
 
 ```pcl

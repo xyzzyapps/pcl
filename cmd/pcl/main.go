@@ -61,6 +61,8 @@ func main() {
 			in.Eval(string(data))
 		}
 	}
+	builtins.Boot(in)
+	defer in.MCP.Close(in.Services.AI())
 
 	// 1. If -c provided, run inline command
 	if *cmdFlag != "" {

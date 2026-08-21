@@ -41,6 +41,7 @@ type AIService interface {
 	Prompt(ctx context.Context, req *AIRequest) (*core.Response, error)
 	PromptMessages(ctx context.Context, req *AIMultiTurnRequest) (*core.Response, error)
 	RegisterTool(name string, description string, params map[string]interface{}, fn func(args map[string]interface{}) (*core.Value, error))
+	UnregisterTool(name string)
 	GetTool(name string) (*core.ToolCall, bool)
 	ListTools() []*core.ToolCall
 }
