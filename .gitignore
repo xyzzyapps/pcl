@@ -1,0 +1,36 @@
+# Local config (API keys)
+config.pcl
+.pclrc
+
+# Build
+pcl
+pcl.exe
+*.exe
+*.dll
+*.so
+*.dylib
+dist/
+bin/
+
+# Go
+vendor/
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+.idea/
+.vscode/
+*.code-workspace
+
+# Session / scratch
+.pcl_history
+*_history
+demo_temp.txt
+foo

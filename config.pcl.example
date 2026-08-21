@@ -1,0 +1,45 @@
+# Copy to config.pcl (gitignored) or ~/.pclrc
+#   copy config.pcl.example config.pcl
+#
+# PCL talks OpenAI Chat Completions. Point api_base + api_key + model
+# at OpenCode, OpenAI/Codex, xAI Grok, or OpenRouter (Claude, etc.).
+# Use $ENV_NAME so secrets stay in the environment, not this file.
+
+ai_config prompt "pcl> "
+ai_config multiline_prompt "...> "
+ai_config temperature 0.7
+ai_config system_prompt (
+    You are an intelligent, concise shell and coding assistant.
+    Always provide direct, executable solutions.
+)
+
+export PCL_EDITOR=nvim
+
+# --- OpenCode (default) ---
+ai_config api_base "https://opencode.ai/zen/go/v1"
+ai_config api_key "$OPENCODE_API_KEY"
+ai_config model "deepseek-v4-flash"
+
+# --- OpenAI / Codex (Chat Completions) ---
+# export OPENAI_API_KEY=...
+# ai_config api_base "https://api.openai.com/v1"
+# ai_config api_key "$OPENAI_API_KEY"
+# ai_config model "gpt-4.1"
+
+# --- Grok (xAI) ---
+# export XAI_API_KEY=...
+# ai_config api_base "https://api.x.ai/v1"
+# ai_config api_key "$XAI_API_KEY"
+# ai_config model "grok-4"
+
+# --- OpenRouter (Claude, Grok, OpenAI, …) ---
+# export OPENROUTER_API_KEY=...
+# ai_config api_base "https://openrouter.ai/api/v1"
+# ai_config api_key "$OPENROUTER_API_KEY"
+# ai_config model "anthropic/claude-sonnet-4"
+# # ai_config model "x-ai/grok-4"
+# # ai_config model "openai/gpt-4.1"
+
+# Optional FFI helpers
+# ffi::bind upper strings.ToUpper
+# load_go "custom_funcs.go"

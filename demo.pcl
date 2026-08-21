@@ -1,0 +1,118 @@
+# ============================================
+# PCL (Prompt Command Language) Comprehensive Demo
+# Modern Syntax: ( ) for blocks/math, { } for arrays/dicts
+# ============================================
+
+# 1. UTF-8 Primitives & Variables
+greeting = "Hello, UTF-8 世界 🚀"
+puts $greeting
+
+# 2. Arithmetic & Logical Expressions with ( )
+a = 15
+b = 27
+total = ($a + $b)
+puts "Sum of $a and $b is: $total"
+
+# 3. Loops and Control Flow with ( )
+counter = 1
+while ($counter <= 3) (
+    puts "Iteration $counter"
+    counter = ($counter + 1)
+)
+
+if ($total > 40) (
+    puts "Conditional branch: total is greater than 40"
+) else (
+    puts "Conditional branch: total is 40 or less"
+)
+
+# 4. Arrays and Dictionaries with { }
+fruits = { apple banana cherry }
+puts "First fruit: $fruits[0]"
+puts "Fruit count: $fruits.len()"
+
+config = { name: "PCL", version: 1, author: "Google" }
+puts "Config name: $config.name"
+puts "Config keys: $config.keys().join(', ')"
+
+# 5. Procedures with ( )
+proc multiply (x y) (
+    return ($x * $y)
+)
+prod = [multiply 6 7]
+puts "6 * 7 = $prod"
+
+# 6. Quoting Operators: q(...), qq(...), qw(...)
+raw = q(Raw string without $expansion)
+puts "Raw: $raw"
+words = qw(alpha beta gamma delta)
+puts "Words count: $words.len()"
+
+# 7. UFCS & Fluent String Methods
+text = "prompt command language"
+puts "Upper: $text.upper()"
+puts "Split & Len: $text.split(' ').len()"
+
+# 8. Standard Go FFI & Custom Go Functions Compilation
+ffi::bind sqrt math.Sqrt
+ffi::bind sha256 crypto.SHA256
+rootVal = [sqrt 144]
+puts "Square root of 144 is: $rootVal"
+hash = [sha256 "pcl-security"]
+puts "SHA256: $hash"
+
+# Compile and Load Custom Go file
+load_go "custom_funcs.go"
+puts [FormatHeader "Custom Go Header"]
+
+# 9. AI Tools, Prompt Operator p( ... ) & Reasoning Extraction
+tool summarize_code (code) (
+    puts "Executing tool summarize_code on $code"
+    return "Code summary: valid Go module"
+)
+
+x = p( explain this architecture and summarize_code )
+puts "Response Keys: $x.keys()"
+puts "AI Response: $x.response"
+if ($x.reasoning != "") (
+    puts "Model Reasoning: $x.reasoning"
+)
+toolResult = $x["tools"][0].exec
+puts "Tool Call Result: $toolResult"
+
+# 10. Staged Pipelines (|> $var), Globbing & Exit Codes ($status)
+echo "streaming dataflow stage 1" |> $pipelineOutput
+puts "Captured in pipeline tap variable: $pipelineOutput"
+puts "Last exit status code: $status"
+
+goFiles = [glob "*.go"]
+puts "Discovered Go source files: $goFiles.len()"
+
+# 11. Fluent File Tests, Path Primitives, I/O & Regex
+cfgPath = "config.pcl"
+if ($cfgPath.exists() && $cfgPath.is_file()) (
+    puts "Config ($cfgPath.base()) exists, size: $cfgPath.size() bytes"
+)
+
+email = "developer@opencode.ai"
+if ($email.matches("@opencode.ai")) (
+    puts "Valid developer email: $email.replace('opencode', 'pcl')"
+)
+
+# 12. Cross-Platform Utilities (touch, rm -f), Redirections & Aliases
+demoFile = "demo_temp.txt"
+$demoFile.write("Temporary demo content\n")
+puts "Written file size: $demoFile.size() bytes"
+rm -f $demoFile
+
+alias greet="echo [PCL ALIAS]"
+greet "System Ready!"
+unalias greet
+
+# 13. Autonomous ReAct Agent Loop (Environment Grounding)
+agentGoal = "Inspect Go codebase and verify architecture"
+agentRes = [agent $agentGoal]
+puts "Agent Turns: $agentRes.steps.len()"
+puts "Agent Tools Used: $agentRes.tools_used().join(', ')"
+puts "Agent Created Files: $agentRes.files().join(', ')"
+puts "Agent Final Output: $agentRes.response"
