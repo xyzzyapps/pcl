@@ -1,4 +1,4 @@
-# PCL
+# PCL - Prompt command language
 
 [![Built with Grok](https://img.shields.io/badge/Built_with-Grok-000000?style=flat&logo=xai&logoColor=white)](https://grok.com)
 
