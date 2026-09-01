@@ -34,3 +34,10 @@ Thumbs.db
 *_history
 demo_temp.txt
 foo
+
+# Console harness debug captures
+tests/conpty/*.log
+tests/conpty/*.txt
+
+# Comparison worktrees
+.worktrees/

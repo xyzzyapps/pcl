@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"sort"
-	"strings"
 	"pcl/pkg/core"
 	"pcl/pkg/services"
+	"sort"
+	"strings"
+	"sync"
 )
 
 // ToolExecutor is the interface for executing AI tool calls within the runtime.
@@ -22,6 +23,7 @@ type AgentOptions struct {
 	SystemPrompt string
 	Model        string
 	StreamWriter io.Writer
+	Chat         *[]*services.AIMessage
 	OnStep       func(step *core.AgentStep)
 }
 
@@ -43,16 +45,7 @@ func RunReActLoop(ctx context.Context, aiSvc services.AIService, exec ToolExecut
 		systemPrompt = "You are an autonomous AI coding agent. You can use available tools to inspect the environment, run commands, and execute tests. Always ground your reasoning in concrete tool output. When you have satisfied the goal, output your final answer without requesting further tools."
 	}
 
-	messages := []*services.AIMessage{
-		{
-			Role:    "system",
-			Content: systemPrompt,
-		},
-		{
-			Role:    "user",
-			Content: goal,
-		},
-	}
+	messages := seedChat(opts.Chat, systemPrompt, goal)
 
 	var allSteps []*core.AgentStep
 	var allToolCalls []*core.ToolCall
@@ -60,17 +53,34 @@ func RunReActLoop(ctx context.Context, aiSvc services.AIService, exec ToolExecut
 	var lastModel string
 	var finalResponse *core.Response
 
+	compacted := false
 	for turn := 1; turn <= opts.MaxTurns; turn++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		tools := exec.ListTools()
 		req := &services.AIMultiTurnRequest{
-			Messages: messages,
-			Tools:    tools,
-			Model:    opts.Model,
-			// Do not HTTP-stream agent turns: tool-only chunks are empty and
-			// token writes fight the REPL. Log each turn below instead.
+			Messages:     messages,
+			Tools:        tools,
+			Model:        opts.Model,
+			StreamWriter: opts.StreamWriter,
 		}
 
 		resp, err := aiSvc.PromptMessages(ctx, req)
+		if err != nil && IsContextOverflow(err) && !compacted {
+			compacted = true
+			cm, cErr := CompactMessages(ctx, aiSvc, messages, opts.Model)
+			if cErr != nil {
+				return nil, fmt.Errorf("agent turn %d error: %w (compact failed: %v)", turn, err, cErr)
+			}
+			messages = cm
+			saveChat(opts.Chat, messages)
+			if opts.StreamWriter != nil {
+				fmt.Fprintln(opts.StreamWriter, "context window full — compacted session, retrying")
+			}
+			turn--
+			continue
+		}
 		if err != nil {
 			return nil, fmt.Errorf("agent turn %d error: %w", turn, err)
 		}
@@ -81,15 +91,6 @@ func RunReActLoop(ctx context.Context, aiSvc services.AIService, exec ToolExecut
 			totalUsage.TotalTokens += resp.Usage.TotalTokens
 		}
 		lastModel = resp.Model
-
-		if opts.StreamWriter != nil {
-			traceThought(opts.StreamWriter, resp.Reasoning)
-			if len(resp.ToolCalls) == 0 {
-				traceAnswer(opts.StreamWriter, resp.Text)
-			} else if strings.TrimSpace(resp.Text) != "" {
-				traceThought(opts.StreamWriter, resp.Text)
-			}
-		}
 
 		step := &core.AgentStep{
 			Turn:      turn,
@@ -102,8 +103,12 @@ func RunReActLoop(ctx context.Context, aiSvc services.AIService, exec ToolExecut
 			allToolCalls = append(allToolCalls, resp.ToolCalls...)
 		}
 
-		// If no tool calls were requested, the model reached a final answer
 		if len(resp.ToolCalls) == 0 {
+			messages = append(messages, &services.AIMessage{
+				Role:      "assistant",
+				Content:   resp.Text,
+				Reasoning: resp.Reasoning,
+			})
 			allSteps = append(allSteps, step)
 			if opts.OnStep != nil {
 				opts.OnStep(step)
@@ -121,32 +126,18 @@ func RunReActLoop(ctx context.Context, aiSvc services.AIService, exec ToolExecut
 		messages = append(messages, &services.AIMessage{
 			Role:      "assistant",
 			Content:   resp.Text,
+			Reasoning: resp.Reasoning,
 			ToolCalls: resp.ToolCalls,
 		})
 
-		for _, tc := range resp.ToolCalls {
-			if opts.StreamWriter != nil {
-				traceTool(opts.StreamWriter, tc)
-			}
-			resultVal, execErr := exec.ExecuteToolCall(tc)
-			obsStr := ""
-			if execErr != nil {
-				obsStr = fmt.Sprintf("Error: %v", execErr)
-			} else if resultVal != nil {
-				obsStr = resultVal.String()
-			}
-
-			if opts.StreamWriter != nil {
-				traceObservation(opts.StreamWriter, obsStr)
-			}
-
-			step.Observations = append(step.Observations, obsStr)
-
+		obs := runToolCalls(exec, resp.ToolCalls, opts.StreamWriter)
+		step.Observations = obs
+		for i, tc := range resp.ToolCalls {
 			messages = append(messages, &services.AIMessage{
 				Role:       "tool",
 				Name:       tc.Name,
 				ToolCallID: tc.ID,
-				Content:    obsStr,
+				Content:    obs[i],
 			})
 		}
 
@@ -183,7 +174,70 @@ func RunReActLoop(ctx context.Context, aiSvc services.AIService, exec ToolExecut
 		// keep last-turn reasoning already on finalResponse
 	}
 
+	saveChat(opts.Chat, messages)
 	return finalResponse, nil
+}
+
+func seedChat(chat *[]*services.AIMessage, systemPrompt, goal string) []*services.AIMessage {
+	user := &services.AIMessage{Role: "user", Content: goal}
+	if chat == nil || len(*chat) == 0 {
+		return []*services.AIMessage{
+			{Role: "system", Content: systemPrompt},
+			user,
+		}
+	}
+	msgs := append([]*services.AIMessage{}, *chat...)
+	if msgs[0] != nil && msgs[0].Role == "system" {
+		msgs[0] = &services.AIMessage{Role: "system", Content: systemPrompt}
+	} else {
+		msgs = append([]*services.AIMessage{{Role: "system", Content: systemPrompt}}, msgs...)
+	}
+	return append(msgs, user)
+}
+
+func saveChat(chat *[]*services.AIMessage, messages []*services.AIMessage) {
+	if chat == nil {
+		return
+	}
+	*chat = messages
+}
+
+func runToolCalls(exec ToolExecutor, calls []*core.ToolCall, stream io.Writer) []string {
+	obs := make([]string, len(calls))
+	if len(calls) == 0 {
+		return obs
+	}
+	if len(calls) == 1 {
+		obs[0] = runOneTool(exec, calls[0], stream)
+		return obs
+	}
+	var wg sync.WaitGroup
+	for i, tc := range calls {
+		wg.Add(1)
+		go func(i int, tc *core.ToolCall) {
+			defer wg.Done()
+			obs[i] = runOneTool(exec, tc, stream)
+		}(i, tc)
+	}
+	wg.Wait()
+	return obs
+}
+
+func runOneTool(exec ToolExecutor, tc *core.ToolCall, stream io.Writer) string {
+	if stream != nil {
+		traceTool(stream, tc)
+	}
+	resultVal, execErr := exec.ExecuteToolCall(tc)
+	obsStr := ""
+	if execErr != nil {
+		obsStr = fmt.Sprintf("Error: %v", execErr)
+	} else if resultVal != nil {
+		obsStr = resultVal.String()
+	}
+	if stream != nil {
+		traceObservation(stream, obsStr)
+	}
+	return obsStr
 }
 
 func compactArgs(args map[string]interface{}) string {
@@ -197,7 +251,7 @@ func compactArgs(args map[string]interface{}) string {
 	sort.Strings(keys)
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {
-		parts = append(parts, k+"="+compactOneLine(fmt.Sprint(args[k]), 80))
+		parts = append(parts, k+"="+compactOneLine(fmt.Sprint(args[k]), 0))
 	}
 	return strings.Join(parts, "  ")
 }

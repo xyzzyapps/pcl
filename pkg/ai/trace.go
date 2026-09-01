@@ -37,16 +37,11 @@ func traceObservation(w io.Writer, obs string) {
 	if w == nil {
 		return
 	}
-	obs = strings.TrimRight(obs, "\n")
 	if strings.TrimSpace(obs) == "" {
 		return
 	}
-	lines := strings.Split(obs, "\n")
-	const max = 16
-	if len(lines) > max {
-		lines = append(lines[:max], "…")
-	}
-	for _, ln := range lines {
+	obs = strings.TrimRight(obs, "\n")
+	for _, ln := range strings.Split(obs, "\n") {
 		fmt.Fprintf(w, "  %s %s\n", paint("\033[2m", "⎿"), paint("\033[2m", ln))
 	}
 }
@@ -55,17 +50,12 @@ func traceThought(w io.Writer, thought string) {
 	if w == nil {
 		return
 	}
-	thought = strings.TrimSpace(thought)
 	if thought == "" {
 		return
 	}
-	lines := strings.Split(thought, "\n")
-	const max = 8
-	if len(lines) > max {
-		lines = append(lines[:max], "…")
-	}
+	thought = strings.TrimRight(thought, "\n")
 	fmt.Fprintln(w)
-	for _, ln := range lines {
+	for _, ln := range strings.Split(thought, "\n") {
 		fmt.Fprintf(w, "%s\n", paint("\033[2;3m", ln))
 	}
 }
@@ -93,7 +83,10 @@ func toolHeadline(tc *core.ToolCall) string {
 		}
 	case "sh":
 		if c, ok := tc.Arguments["cmd"]; ok {
-			return "sh  " + compactOneLine(fmt.Sprint(c), 100)
+			return "sh  " + fmt.Sprint(c)
+		}
+		if c, ok := tc.Arguments["command"]; ok {
+			return "sh  " + fmt.Sprint(c)
 		}
 	}
 	return strings.TrimSpace(tc.Name + "  " + compactArgs(tc.Arguments))

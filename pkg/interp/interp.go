@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
-	"sync"
 	"pcl/pkg/core"
 	"pcl/pkg/ffi"
 	"pcl/pkg/mcpctl"
 	"pcl/pkg/parser"
 	"pcl/pkg/services"
 	"pcl/pkg/skills"
+	"strings"
+	"sync"
 )
 
 // BuiltinFunc is the signature for built-in PCL commands.
@@ -21,16 +21,17 @@ type BuiltinFunc func(in *Interpreter, args []*core.Value) (*core.Value, error)
 
 // Interpreter is the main runtime execution engine.
 type Interpreter struct {
-	mu       sync.RWMutex
-	Ctx      context.Context
-	Scope    *Scope
-	Services *services.ServiceLocator
-	Builtins map[string]BuiltinFunc
-	Procs    map[string]*ProcDef
+	mu           sync.RWMutex
+	Ctx          context.Context
+	Scope        *Scope
+	Services     *services.ServiceLocator
+	Builtins     map[string]BuiltinFunc
+	Procs        map[string]*ProcDef
 	Aliases      map[string]string
 	StreamWriter io.Writer
 	Skills       *skills.Registry
 	MCP          *mcpctl.Manager
+	Chat         []*services.AIMessage
 }
 
 // NewInterpreter constructs a new Interpreter.

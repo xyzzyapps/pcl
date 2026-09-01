@@ -1,0 +1,3 @@
+# Minimal config for offline ConPTY repro (no API key -> mock AI path).
+ai_config prompt "pcl> "
+ai_config multiline_prompt "...> "

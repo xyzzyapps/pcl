@@ -31,7 +31,7 @@ Run a script instead of the REPL: `.\pcl.exe demo.pcl`
 One shot: `.\pcl.exe -c "pwd"`
 
 History lives in `~/.pcl_history` (`history`, `history clear`). **Tab** completes commands, files, `$vars`, and `ai_config` keys. After `ls`, `cd`, `cat`, `mv`, and the other file commands, type a **space** then Tab to complete filenames (`ls <Tab>`, `ls README<Tab>`). `ls<Tab>` with no space still completes the command name.  
-`p(...)` / `agent` run **in the background**. Tool use looks like other agents (`● write_file  path`, result underneath); the answer prints as normal text. You can keep typing. `jobs` lists them. Ctrl-C clears the line; it does not kill the job.  
+`p(...)` / `agent` run **in the background** and stream **inline**: completed lines print above the prompt and the in-flight line updates in place, so the terminal's own scrollback and the `pcl>` prompt both keep working — you can keep typing, and Ctrl+L / `clear` / resizing never corrupt anything. Tool use looks like other agents (`● write_file  path`, result underneath). `jobs` lists running jobs. Ctrl+C stops a running prompt.  
 Editor: `nvim` if it’s on `PATH`, or set `PCL_EDITOR` / `EDITOR`.
 
 Startup file: `config.pcl` in the current directory, or `~/.pclrc`.

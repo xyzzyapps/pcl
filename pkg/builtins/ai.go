@@ -2,12 +2,14 @@ package builtins
 
 import (
 	"fmt"
-	"strings"
 	"pcl/pkg/ai"
 	"pcl/pkg/core"
 	"pcl/pkg/interp"
 	"pcl/pkg/services"
 	"pcl/pkg/shell"
+	"strconv"
+	"strings"
+	"time"
 )
 
 // RegisterAIBuiltins registers prompt, tool management, and ReAct agent primitives.
@@ -36,9 +38,29 @@ func RegisterAIBuiltins(in *interp.Interpreter) {
 		if err != nil {
 			return nil, err
 		}
-		return core.NewResponse(resp), nil
+		out := core.NewResponse(resp)
+		in.Scope.Set("_", out)
+		return out, nil
 	})
 	in.RegisterBuiltin("p", in.Builtins["prompt"])
+
+	compactFn := func(in *interp.Interpreter, args []*core.Value) (*core.Value, error) {
+		n0 := len(in.Chat)
+		if n0 < 6 {
+			in.Services.IO().Println("nothing to compact")
+			return core.NewNull(), nil
+		}
+		model := in.Services.Config().Get("model")
+		msgs, err := ai.CompactMessages(in.Ctx, in.Services.AI(), in.Chat, model)
+		if err != nil {
+			return nil, err
+		}
+		in.Chat = msgs
+		in.Services.IO().Printf("compacted %d → %d messages\n", n0, len(in.Chat))
+		return core.NewInt(int64(len(in.Chat))), nil
+	}
+	in.RegisterBuiltin(".compact", compactFn)
+	in.RegisterBuiltin("compact", compactFn)
 
 	// agent <goal> (autonomous ReAct feedback loop grounded in environment feedback)
 	in.RegisterBuiltin("agent", func(in *interp.Interpreter, args []*core.Value) (*core.Value, error) {
@@ -54,12 +76,15 @@ func RegisterAIBuiltins(in *interp.Interpreter) {
 		opts := ai.DefaultAgentOptions()
 		opts.Model = in.Services.Config().Get("model")
 		opts.SystemPrompt = in.EffectiveSystemPrompt()
+		opts.Chat = &in.Chat
 
 		resp, err := ai.RunReActLoop(in.Ctx, in.Services.AI(), in, goal, opts)
 		if err != nil {
 			return nil, err
 		}
-		return core.NewResponse(resp), nil
+		out := core.NewResponse(resp)
+		in.Scope.Set("_", out)
+		return out, nil
 	})
 
 	// tool <name> <params> <body>
@@ -141,31 +166,71 @@ func RegisterAIBuiltins(in *interp.Interpreter) {
 func registerDefaultEnvironmentTools(in *interp.Interpreter) {
 	aiSvc := in.Services.AI()
 
-	// 1. sh: POSIX shell (busybox sh on Windows, sh on Unix)
-	aiSvc.RegisterTool("sh", "Run a POSIX shell command (busybox sh on Windows, sh on Unix). Pass the script in cmd.", map[string]interface{}{"cmd": "string"}, func(argMap map[string]interface{}) (*core.Value, error) {
-		cmdStr, _ := argMap["cmd"].(string)
+	aiSvc.RegisterTool("sh", "Run a POSIX shell command (busybox sh on Windows, sh on Unix). Foreground wait grows Fibonacci (1s, 1s, 2s, 3s, …) while output is flowing; a silent slice backgrounds the process and returns a session id. Use sh_output / sh_kill. Optional timeout (ms, max 10m) waits that long even if silent. run_in_background=true starts immediately. Ctrl+C cancels a foreground wait.", map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"cmd":               map[string]interface{}{"type": "string", "description": "POSIX script to run"},
+			"command":           map[string]interface{}{"type": "string", "description": "Alias for cmd"},
+			"timeout":           map[string]interface{}{"type": "number", "description": "Optional hard foreground wait in milliseconds (max 600000). Default is Fibonacci slices that background on silence."},
+			"timeout_ms":        map[string]interface{}{"type": "number"},
+			"block_until_ms":    map[string]interface{}{"type": "number"},
+			"run_in_background": map[string]interface{}{"type": "boolean", "description": "Start and return immediately with a session id"},
+			"background":        map[string]interface{}{"type": "boolean"},
+		},
+	}, func(argMap map[string]interface{}) (*core.Value, error) {
+		cmdStr := firstString(argMap, "cmd", "command")
 		if cmdStr == "" {
 			return core.NewString("Error: cmd parameter required"), nil
 		}
-
-		out, errOut, err := shell.RunPOSIX(in.Ctx, cmdStr)
-		output := strings.TrimSpace(out)
-		errOut = strings.TrimSpace(errOut)
-
-		if err != nil {
-			if errOut != "" {
-				return core.NewString(fmt.Sprintf("%s\nError: %v", errOut, err)), nil
-			}
-			return core.NewString(fmt.Sprintf("Error: %v", err)), nil
+		opts := shell.AwaitOpts{
+			Background: firstBool(argMap, "run_in_background", "background"),
+			Timeout:    firstDurationMS(argMap, "timeout", "timeout_ms", "block_until_ms"),
 		}
+		r := shell.StartAndAwait(in.Ctx, cmdStr, opts)
+		return core.NewString(formatShellResult(r)), nil
+	})
 
-		if output == "" && errOut != "" {
-			return core.NewString(errOut), nil
+	aiSvc.RegisterTool("sh_output", "Read captured output from a background shell session started by sh.", map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"id": map[string]interface{}{"type": "string", "description": "Session id returned by sh (e.g. sh_1)"},
+		},
+		"required": []string{"id"},
+	}, func(argMap map[string]interface{}) (*core.Value, error) {
+		id := firstString(argMap, "id")
+		if id == "" {
+			return core.NewString("Error: id required"), nil
 		}
-		if output == "" {
-			return core.NewString("(command completed with exit code 0)"), nil
+		s, ok := shell.GetSession(id)
+		if !ok {
+			return core.NewString("Error: no shell session " + id), nil
 		}
-		return core.NewString(output), nil
+		out := strings.TrimSpace(s.Output())
+		st := "exited"
+		if s.Running() {
+			st = "running"
+		}
+		if out == "" {
+			out = "(no output yet)"
+		}
+		return core.NewString(fmt.Sprintf("[%s %s]\n%s", id, st, out)), nil
+	})
+
+	aiSvc.RegisterTool("sh_kill", "Stop a background shell session started by sh.", map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"id": map[string]interface{}{"type": "string", "description": "Session id returned by sh"},
+		},
+		"required": []string{"id"},
+	}, func(argMap map[string]interface{}) (*core.Value, error) {
+		id := firstString(argMap, "id")
+		if id == "" {
+			return core.NewString("Error: id required"), nil
+		}
+		if err := shell.KillSession(id); err != nil {
+			return core.NewString("Error: " + err.Error()), nil
+		}
+		return core.NewString("killed " + id), nil
 	})
 
 	// 2. read_file tool: reads file content
@@ -194,4 +259,88 @@ func registerDefaultEnvironmentTools(in *interp.Interpreter) {
 		}
 		return core.NewString(fmt.Sprintf("Successfully wrote %d bytes to '%s'", len(content), path)), nil
 	})
+}
+
+func formatShellResult(r shell.SessionResult) string {
+	body := strings.TrimSpace(r.Combined())
+	if r.Running {
+		var sb strings.Builder
+		if body != "" {
+			sb.WriteString(body)
+			sb.WriteByte('\n')
+		}
+		sb.WriteString(fmt.Sprintf("Command still running in background (id %s pid %d).\n", r.ID, r.Pid))
+		sb.WriteString("Use sh_output with that id to read new output, or sh_kill to stop it.")
+		return sb.String()
+	}
+	if r.Err != nil {
+		if body != "" {
+			return fmt.Sprintf("%s\nError: %v", body, r.Err)
+		}
+		return fmt.Sprintf("Error: %v", r.Err)
+	}
+	if body == "" {
+		return "(command completed with exit code 0)"
+	}
+	return body
+}
+
+func firstString(m map[string]interface{}, keys ...string) string {
+	for _, k := range keys {
+		if v, ok := m[k]; ok && v != nil {
+			if s := strings.TrimSpace(fmt.Sprint(v)); s != "" && s != "<nil>" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+func firstBool(m map[string]interface{}, keys ...string) bool {
+	for _, k := range keys {
+		switch v := m[k].(type) {
+		case bool:
+			return v
+		case string:
+			b, err := strconv.ParseBool(v)
+			if err == nil {
+				return b
+			}
+		}
+	}
+	return false
+}
+
+func firstDurationMS(m map[string]interface{}, keys ...string) time.Duration {
+	for _, k := range keys {
+		v, ok := m[k]
+		if !ok || v == nil {
+			continue
+		}
+		var ms float64
+		switch t := v.(type) {
+		case float64:
+			ms = t
+		case int:
+			ms = float64(t)
+		case int64:
+			ms = float64(t)
+		case string:
+			n, err := strconv.ParseFloat(strings.TrimSpace(t), 64)
+			if err != nil {
+				continue
+			}
+			ms = n
+		default:
+			continue
+		}
+		if ms < 0 {
+			return -1
+		}
+		if ms == 0 {
+			continue
+		}
+		return time.Duration(ms) * time.Millisecond
+	}
+	return 0
 }

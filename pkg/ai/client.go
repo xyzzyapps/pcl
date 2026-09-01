@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
-	"sync"
 	"pcl/pkg/core"
 	"pcl/pkg/services"
+	"strings"
+	"sync"
 
 	openai "github.com/sashabaranov/go-openai"
 )
@@ -222,9 +222,10 @@ func (c *UniversalAIClient) PromptMessages(ctx context.Context, req *services.AI
 	messages := make([]openai.ChatCompletionMessage, 0, len(req.Messages))
 	for _, m := range req.Messages {
 		msg := openai.ChatCompletionMessage{
-			Role:    m.Role,
-			Content: m.Content,
-			Name:    m.Name,
+			Role:             m.Role,
+			Content:          m.Content,
+			ReasoningContent: m.Reasoning,
+			Name:             m.Name,
 		}
 		if m.ToolCallID != "" {
 			msg.ToolCallID = m.ToolCallID
@@ -315,10 +316,15 @@ func (c *UniversalAIClient) streamCompletion(ctx context.Context, client *openai
 		delta := response.Choices[0].Delta
 		if delta.ReasoningContent != "" {
 			fullReasoning.WriteString(delta.ReasoningContent)
+			if w != nil {
+				_, _ = w.Write([]byte(paint("\033[2;3m", delta.ReasoningContent)))
+			}
 		}
 		if delta.Content != "" {
 			fullContent.WriteString(delta.Content)
-			_, _ = w.Write([]byte(delta.Content))
+			if w != nil {
+				_, _ = w.Write([]byte(delta.Content))
+			}
 		}
 		for _, tc := range delta.ToolCalls {
 			idx := 0
@@ -387,5 +393,3 @@ func openaiToolsFromPCL(tools []*core.ToolCall) []openai.Tool {
 	}
 	return toolsList
 }
-
-

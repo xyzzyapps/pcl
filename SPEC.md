@@ -175,6 +175,31 @@ FFI (`ffi::bind`, `load_go`) and pre-bound `math.*` / `strings.*` / `regexp.*` /
 
 ---
 
+## 8.1 REPL inline streaming (`pkg/repl/repl.go`, `jobWriter`)
+
+`p(...)` / `agent` jobs stream **inline** instead of into a pinned region:
+completed lines are written above the prompt through readline's own stdout
+writer (`wrapWriter` erases the prompt, emits, redraws it below), and the
+in-flight partial line is rewritten in place (wrapped to the terminal width;
+previous partial rows erased with `CSI A` + `CSI 2K` before each redraw).
+
+Because there is no reserved screen region, there is no layout contract for
+Ctrl+L, `clear`/`cls`, or terminal resizes to break — the terminal's native
+scrollback and prompt behavior are untouched. All stream writes are
+serialized under `REPL.outMu`.
+
+Platform bits: `terminal_windows.go` / `terminal_unix.go` provide
+`InitTerminal` (UTF-8 + VT mode on Windows), `TermWidth`, `TermHeight`.
+
+Headless verification: `tests/conpty` spawns `pcl.exe` in a fresh console
+(`CREATE_NEW_CONSOLE`), attaches with `AttachConsole`, injects keystrokes
+with `WriteConsoleInput`, and scrapes the screen buffer
+(`ReadConsoleOutputCharacterW`) at 80ms intervals into
+`tests/conpty/frames.log`. (True ConPTY pipes do not deliver output inside
+the sandbox, hence the attach-and-scrape approach.)
+
+---
+
 ## 9. Language notes
 
 **Blocks and arithmetic** — `( ... )` for bodies, conditions, and expressions:

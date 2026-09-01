@@ -3,35 +3,55 @@ package ai
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"pcl/pkg/core"
 
 	openai "github.com/sashabaranov/go-openai"
 )
 
-// ExtractReasoning pulls model thought from API reasoning_content and <think> tags.
+var thinkBlockRE = regexp.MustCompile(`(?is)<think(?:ing)?>\s*([\s\S]*?)\s*</think(?:ing)?>`)
+var thinkOpenRE = regexp.MustCompile(`(?is)<think(?:ing)?>`)
+
+// ExtractReasoning splits API thought from user-visible text.
+// Sources, in order: reasoning_content (DeepSeek / Kimi / OpenCode), then
+// every <think> / <thinking> block in content (Qwen and similar). Duplicate
+// bodies are kept once. Visible text is content with those tags removed.
 func ExtractReasoning(content, reasoningContent string) (reasoning, text string) {
-	text = content
-	if strings.Contains(content, "<think>") && strings.Contains(content, "</think>") {
-		start := strings.Index(content, "<think>")
-		end := strings.Index(content, "</think>")
-		if start != -1 && end != -1 && end > start {
-			tag := strings.TrimSpace(content[start+len("<think>") : end])
-			text = strings.TrimSpace(content[:start] + content[end+len("</think>"):])
-			if tag != "" {
-				reasoning = tag
+	var blocks []string
+	text = thinkBlockRE.ReplaceAllStringFunc(content, func(m string) string {
+		sub := thinkBlockRE.FindStringSubmatch(m)
+		if len(sub) > 1 {
+			if t := strings.TrimSpace(sub[1]); t != "" {
+				blocks = append(blocks, t)
 			}
 		}
-	}
-	rc := strings.TrimSpace(reasoningContent)
-	if rc != "" {
-		if reasoning != "" && rc != reasoning {
-			reasoning = rc + "\n" + reasoning
-		} else {
-			reasoning = rc
+		return ""
+	})
+	if loc := thinkOpenRE.FindStringIndex(text); loc != nil {
+		rest := text[loc[1]:]
+		if t := strings.TrimSpace(rest); t != "" {
+			blocks = append(blocks, t)
 		}
+		text = text[:loc[0]]
 	}
-	return reasoning, text
+	text = strings.TrimSpace(text)
+
+	rc := strings.TrimSpace(reasoningContent)
+	var parts []string
+	seen := map[string]bool{}
+	add := func(s string) {
+		if s == "" || seen[s] {
+			return
+		}
+		seen[s] = true
+		parts = append(parts, s)
+	}
+	add(rc)
+	for _, b := range blocks {
+		add(b)
+	}
+	return strings.Join(parts, "\n"), text
 }
 
 func toolCallsFromOpenAI(c *UniversalAIClient, msg openai.ChatCompletionMessage, extra []*core.ToolCall) []*core.ToolCall {

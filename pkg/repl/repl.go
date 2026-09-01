@@ -2,18 +2,20 @@ package repl
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
-	"strings"
-	"sync"
-	"sync/atomic"
+	"os/signal"
 	"pcl/pkg/builtins"
 	"pcl/pkg/core"
 	"pcl/pkg/interp"
 	"pcl/pkg/parser"
 	"pcl/pkg/services"
 	"pcl/pkg/shell"
+	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/chzyer/readline"
 )
@@ -31,12 +33,17 @@ type REPL struct {
 	nextJob int64
 	jobs    map[int64]*bgJob
 	closed  atomic.Bool
+
+	prompt      string
+	multiPrompt string
+	continuing  atomic.Bool
 }
 
 type bgJob struct {
 	id      int64
 	cmd     string
 	running bool
+	cancel  context.CancelFunc
 }
 
 // NewREPL creates a ready-to-run REPL instance with all builtins registered.
@@ -102,6 +109,13 @@ func (r *REPL) Run() error {
 		InterruptPrompt: "^C",
 		EOFPrompt:       "exit",
 		UniqueEditLine:  false,
+		FuncFilterInputRune: func(rn rune) (rune, bool) {
+			if rn == readline.CharInterrupt {
+				r.cancelRunningJobs()
+				return rn, true
+			}
+			return rn, true
+		},
 	}
 	rl, err := readline.NewEx(cfg)
 	if err != nil {
@@ -114,12 +128,17 @@ func (r *REPL) Run() error {
 	}()
 	r.rl = rl
 
-	r.io.Println("PCL — type a command, Tab to complete, p(...) runs in the background while you keep typing")
+	r.prompt = prompt
+	r.multiPrompt = multiPrompt
+	r.io.Println("PCL — type a command, Tab to complete, p(...) streams inline while you keep typing")
+	r.io.Println("Ctrl+C stops a running prompt  ·  long-running sh jobs keep going in the background")
+	r.watchInterrupt()
 	r.running = true
 
 	var buffer strings.Builder
 
 	for r.running {
+		r.continuing.Store(buffer.Len() > 0)
 		if buffer.Len() == 0 {
 			rl.SetPrompt(prompt)
 		} else {
@@ -129,6 +148,7 @@ func (r *REPL) Run() error {
 		line, err := rl.Readline()
 		if err != nil {
 			if err == readline.ErrInterrupt {
+				r.cancelRunningJobs()
 				buffer.Reset()
 				continue
 			}
@@ -183,37 +203,61 @@ func (r *REPL) evalForeground(cmdStr string) {
 	}
 }
 
+func (r *REPL) watchInterrupt() {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, os.Interrupt)
+	go func() {
+		for range ch {
+			r.cancelRunningJobs()
+		}
+	}()
+}
+
+func (r *REPL) cancelRunningJobs() {
+	r.jobMu.Lock()
+	defer r.jobMu.Unlock()
+	for _, j := range r.jobs {
+		if j.running && j.cancel != nil {
+			j.cancel()
+		}
+	}
+}
+
 func (r *REPL) startAIJob(cmdStr string) {
 	id := atomic.AddInt64(&r.nextJob, 1)
-	j := &bgJob{id: id, cmd: trimJobPreview(cmdStr), running: true}
+	ctx, cancel := context.WithCancel(context.Background())
+	j := &bgJob{id: id, cmd: trimJobPreview(cmdStr), running: true, cancel: cancel}
 	r.jobMu.Lock()
 	r.jobs[id] = j
 	r.jobMu.Unlock()
 
 	sw := &jobWriter{repl: r, id: id}
+	sw.startThinking()
 	go func() {
+		defer cancel()
 		r.aiMu.Lock()
 		defer r.aiMu.Unlock()
+		prev := r.in.Ctx
+		r.in.Ctx = ctx
 		r.in.StreamWriter = sw
 		_, err := r.in.Eval(cmdStr)
 		r.in.StreamWriter = nil
+		r.in.Ctx = prev
 
 		r.jobMu.Lock()
 		j.running = false
 		r.jobMu.Unlock()
 
 		if err != nil {
-			fmt.Fprintf(sw, "error: %v\n", err)
+			if ctx.Err() != nil {
+				fmt.Fprintf(sw, "stopped (^C)\n")
+			} else {
+				fmt.Fprintf(sw, "error: %v\n", err)
+			}
 		}
 		sw.Flush()
 		r.refreshPrompt()
 	}()
-}
-
-type jobWriter struct {
-	repl *REPL
-	id   int64
-	buf  bytes.Buffer
 }
 
 func (r *REPL) refreshPrompt() {
@@ -227,6 +271,28 @@ func (r *REPL) refreshPrompt() {
 	}
 }
 
+// jobWriter streams AI output inline: completed lines print above the prompt
+// and the in-flight partial line is rewritten in place. All writes go through
+// readline's own stdout writer (its wrapWriter erases the prompt, emits, then
+// redraws it), so there is no pinned region and no layout contract that a
+// screen reset (Ctrl+L, clear, resize) can break.
+type jobWriter struct {
+	repl    *REPL
+	id      int64
+	buf     bytes.Buffer
+	partial string
+	// nPartialLines is how many screen rows the last partial update drew
+	// (after display-width wrapping); they get erased before the next draw.
+	nPartialLines int
+	stopped       bool
+}
+
+func (w *jobWriter) startThinking() {
+	w.repl.outMu.Lock()
+	defer w.repl.outMu.Unlock()
+	w.printLocked("thinking…\n")
+}
+
 func (w *jobWriter) Write(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
@@ -235,15 +301,23 @@ func (w *jobWriter) Write(p []byte) (int, error) {
 	defer w.repl.outMu.Unlock()
 	_, _ = w.buf.Write(p)
 	w.drainLocked(false)
+	w.partial = string(bytes.TrimRight(w.buf.Bytes(), "\r"))
+	if !w.stopped {
+		w.redrawPartialLocked()
+	}
 	return len(p), nil
 }
 
 func (w *jobWriter) Flush() {
 	w.repl.outMu.Lock()
 	defer w.repl.outMu.Unlock()
+	w.stopped = true
 	w.drainLocked(true)
+	w.erasePartialLocked()
+	w.partial = ""
 }
 
+// drainLocked emits every complete line currently buffered.
 func (w *jobWriter) drainLocked(flush bool) {
 	for {
 		data := w.buf.Bytes()
@@ -252,27 +326,50 @@ func (w *jobWriter) drainLocked(flush bool) {
 			break
 		}
 		line := string(bytes.TrimRight(data[:i], "\r"))
+		w.erasePartialLocked()
+		w.printLocked(line + "\n")
 		w.buf.Next(i + 1)
-		w.emitLocked(line)
+		w.partial = ""
 	}
 	if flush && w.buf.Len() > 0 {
-		w.emitLocked(w.buf.String())
+		w.erasePartialLocked()
+		w.printLocked(string(bytes.TrimRight(w.buf.Bytes(), "\r")) + "\n")
 		w.buf.Reset()
+		w.partial = ""
 	}
 }
 
-func (w *jobWriter) emitLocked(line string) {
-	if w.repl.closed.Load() {
+// redrawPartialLocked replaces the previously drawn partial rows with the
+// current partial text, wrapped to the terminal width.
+func (w *jobWriter) redrawPartialLocked() {
+	w.erasePartialLocked()
+	if w.partial == "" {
 		return
 	}
-	// Erase the live prompt, print the log line, then redraw pcl> at the bottom.
-	if rl := w.repl.rl; rl != nil {
-		rl.Clean()
-		_, _ = fmt.Fprintf(rl.Stdout(), "%s\n", line)
-		rl.Refresh()
-		return
+	width := TermWidth() - 1
+	if width < 20 {
+		width = 79
 	}
-	fmt.Fprintln(os.Stderr, line)
+	lines := WrapDisplay(w.partial, width)
+	w.printLocked(strings.Join(lines, "\n") + "\n")
+	w.nPartialLines = len(lines)
+}
+
+// erasePartialLocked removes the rows drawn by the previous partial update,
+// leaving the cursor at the start of the (now empty) first erased row.
+func (w *jobWriter) erasePartialLocked() {
+	for i := 0; i < w.nPartialLines; i++ {
+		w.printLocked("\033[A\r\033[2K")
+	}
+	w.nPartialLines = 0
+}
+
+func (w *jobWriter) printLocked(s string) {
+	var out io.Writer = os.Stderr
+	if w.repl.rl != nil {
+		out = w.repl.rl.Stdout()
+	}
+	fmt.Fprint(out, s)
 }
 
 func looksLikeAICommand(cmd string) bool {

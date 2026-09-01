@@ -10,6 +10,7 @@ import (
 type AIMessage struct {
 	Role       string           `json:"role"` // "system", "user", "assistant", "tool"
 	Content    string           `json:"content"`
+	Reasoning  string           `json:"reasoning_content,omitempty"`
 	Name       string           `json:"name,omitempty"`
 	ToolCallID string           `json:"tool_call_id,omitempty"`
 	ToolCalls  []*core.ToolCall `json:"tool_calls,omitempty"`

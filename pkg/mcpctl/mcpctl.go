@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"pcl/pkg/core"
+	"pcl/pkg/services"
 	"sort"
 	"strings"
 	"sync"
 	"time"
-	"pcl/pkg/core"
-	"pcl/pkg/services"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -145,7 +145,7 @@ func (m *Manager) attach(name string, argv []string, session *mcp.ClientSession,
 			orig := t.Name
 			sess := session
 			ai.RegisterTool(pclName, desc, params, func(argMap map[string]interface{}) (*core.Value, error) {
-				rctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				rctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
 				res, err := sess.CallTool(rctx, &mcp.CallToolParams{
 					Name:      orig,

@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"strconv"
-	"strings"
 	"pcl/pkg/ai"
 	"pcl/pkg/core"
 	"pcl/pkg/parser"
 	"pcl/pkg/services"
+	"strconv"
+	"strings"
 )
 
 // EvalWord performs variable ($var) and command ([cmd]) substitutions on a token.
@@ -285,6 +285,7 @@ func (in *Interpreter) evalPrompt(promptText string, stream bool, promptOpt stri
 	opts := ai.DefaultAgentOptions()
 	opts.Model = in.Services.Config().Get("model")
 	opts.SystemPrompt = in.EffectiveSystemPrompt()
+	opts.Chat = &in.Chat
 	if sw := in.streamDest(stream); sw != nil {
 		opts.StreamWriter = sw
 	}
@@ -312,7 +313,7 @@ func (in *Interpreter) evalPrompt(promptText string, stream bool, promptOpt stri
 		if err != nil {
 			return nil, fmt.Errorf("agent execution error: %w", err)
 		}
-		return core.NewResponse(resp), nil
+		return in.setLast(core.NewResponse(resp)), nil
 	}
 
 	req := &services.AIRequest{
@@ -337,8 +338,28 @@ func (in *Interpreter) evalPrompt(promptText string, stream bool, promptOpt stri
 	if err != nil {
 		return nil, fmt.Errorf("AI prompt execution error: %w", err)
 	}
+	in.appendChatTurn(promptText, resp)
+	return in.setLast(core.NewResponse(resp)), nil
+}
 
-	return core.NewResponse(resp), nil
+func (in *Interpreter) appendChatTurn(userText string, resp *core.Response) {
+	if in == nil || resp == nil {
+		return
+	}
+	if len(in.Chat) == 0 {
+		in.Chat = []*services.AIMessage{{Role: "system", Content: in.EffectiveSystemPrompt()}}
+	}
+	in.Chat = append(in.Chat,
+		&services.AIMessage{Role: "user", Content: userText},
+		&services.AIMessage{Role: "assistant", Content: resp.Text, Reasoning: resp.Reasoning, ToolCalls: resp.ToolCalls},
+	)
+}
+
+func (in *Interpreter) setLast(val *core.Value) *core.Value {
+	if in != nil && in.Scope != nil && val != nil {
+		in.Scope.Set("_", val)
+	}
+	return val
 }
 
 func (in *Interpreter) streamDest(explicit bool) io.Writer {

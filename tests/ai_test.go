@@ -3,12 +3,14 @@ package tests
 import (
 	"context"
 	"encoding/json"
-	"testing"
+	"fmt"
 	"pcl/pkg/ai"
 	"pcl/pkg/builtins"
 	"pcl/pkg/core"
 	"pcl/pkg/interp"
 	"pcl/pkg/services"
+	"strings"
+	"testing"
 )
 
 func TestExtractReasoning(t *testing.T) {
@@ -19,6 +21,23 @@ func TestExtractReasoning(t *testing.T) {
 	r, text = ai.ExtractReasoning("<think>secret</think>\nanswer", "")
 	if r != "secret" || text != "answer" {
 		t.Fatalf("think tags: got %q / %q", r, text)
+	}
+	r, text = ai.ExtractReasoning("<think>a</think>\nmid\n<think>b</think>\nend", "")
+	if r != "a\nb" || text != "mid\n\nend" && text != "mid\nend" {
+		if r != "a\nb" {
+			t.Fatalf("multi think reasoning: got %q", r)
+		}
+		if !strings.Contains(text, "mid") || !strings.Contains(text, "end") {
+			t.Fatalf("multi think text: got %q", text)
+		}
+	}
+	r, text = ai.ExtractReasoning("<think>same</think>shown", "same")
+	if r != "same" || text != "shown" {
+		t.Fatalf("dedupe: got %q / %q", r, text)
+	}
+	r, text = ai.ExtractReasoning("<think>unclosed remainder", "")
+	if r != "unclosed remainder" || text != "" {
+		t.Fatalf("unclosed: got %q / %q", r, text)
 	}
 }
 
@@ -102,6 +121,11 @@ func TestAIPromptAndResponseObject(t *testing.T) {
 		t.Fatalf("x['response'] failed: %v", err)
 	}
 
+	last, ok := in.Scope.Get("_")
+	if !ok || last.Type() != core.TypeResponse {
+		t.Fatalf("expected _ to hold the prompt result, got %v", last)
+	}
+
 	if xVal.RespVal == nil || len(xVal.RespVal.ToolCalls) == 0 {
 		t.Fatalf("expected tool calls on prompt response, steps=%v tools=%v", xVal.RespVal.Steps, xVal.RespVal.ToolCalls)
 	}
@@ -110,5 +134,89 @@ func TestAIPromptAndResponseObject(t *testing.T) {
 	toolRes, err := in.Eval(`x["tools"][0].exec`)
 	if err != nil || toolRes.String() != "Sunny 22C" {
 		t.Fatalf("tool execution failed: expected 'Sunny 22C', got '%v' (err: %v)", toolRes, err)
+	}
+}
+
+func TestBarePromptStoresUnderscore(t *testing.T) {
+	loc := services.NewServiceLocator()
+	mockAI := ai.NewMockAIClient()
+	loc.SetAI(mockAI)
+	in := interp.NewInterpreter(context.Background(), loc)
+	builtins.RegisterCoreBuiltins(in)
+	builtins.RegisterAIBuiltins(in)
+
+	_, err := in.Eval(`p( hello there )`)
+	if err != nil {
+		t.Fatalf("bare p() failed: %v", err)
+	}
+	last, ok := in.Scope.Get("_")
+	if !ok || last == nil || last.Type() != core.TypeResponse {
+		t.Fatalf("expected $_ to be a response after p(), got %v", last)
+	}
+	text, err := in.Eval(`$_.response`)
+	if err != nil || text.String() == "" {
+		t.Fatalf("$_.response failed: %v %v", text, err)
+	}
+}
+
+func TestIsContextOverflow(t *testing.T) {
+	if !ai.IsContextOverflow(fmt.Errorf("context_length_exceeded")) {
+		t.Fatal("expected overflow detect")
+	}
+	if ai.IsContextOverflow(fmt.Errorf("connection refused")) {
+		t.Fatal("did not expect overflow")
+	}
+}
+
+func TestCompactMessagesShrinksHistory(t *testing.T) {
+	mock := ai.NewMockAIClient()
+	var msgs []*services.AIMessage
+	msgs = append(msgs, &services.AIMessage{Role: "system", Content: "sys"})
+	for i := 0; i < 12; i++ {
+		msgs = append(msgs, &services.AIMessage{Role: "user", Content: "u"})
+		msgs = append(msgs, &services.AIMessage{Role: "assistant", Content: "a"})
+	}
+	n0 := len(msgs)
+	out, err := ai.CompactMessages(context.Background(), mock, msgs, "mock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) >= n0 {
+		t.Fatalf("expected shrink %d -> %d", n0, len(out))
+	}
+	if out[0].Role != "system" {
+		t.Fatal("system prompt should remain first")
+	}
+}
+
+func TestPromptCommandsShareSessionChat(t *testing.T) {
+	loc := services.NewServiceLocator()
+	mockAI := ai.NewMockAIClient()
+	loc.SetAI(mockAI)
+	in := interp.NewInterpreter(context.Background(), loc)
+	builtins.RegisterCoreBuiltins(in)
+	builtins.RegisterAIBuiltins(in)
+
+	if _, err := in.Eval(`p( hello there )`); err != nil {
+		t.Fatal(err)
+	}
+	n := len(in.Chat)
+	if n < 3 {
+		t.Fatalf("expected system+user+assistant in chat, got %d", n)
+	}
+	if _, err := in.Eval(`p( what did I just say )`); err != nil {
+		t.Fatal(err)
+	}
+	if len(in.Chat) <= n {
+		t.Fatalf("expected chat to grow across p() calls, %d -> %d", n, len(in.Chat))
+	}
+	users := 0
+	for _, m := range in.Chat {
+		if m.Role == "user" {
+			users++
+		}
+	}
+	if users < 2 {
+		t.Fatalf("expected both prompts in session chat, users=%d", users)
 	}
 }
